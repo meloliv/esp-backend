@@ -1,30 +1,42 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, Depends
 from pydantic import BaseModel
+from sqlalchemy.orm import Session
+
+from database import Base, engine, SessionLocal
+from models import Contagem
+
+Base.metadata.create_all(bind=engine)
 
 app = FastAPI()
 
-class Contagem(BaseModel):
+
+def get_db():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+
+
+class ContagemPayload(BaseModel):
     contador: int
 
 
-@app.get("/api/status")
-def status():
-    return {"status": "servidor online"}
-
-
 @app.post("/api/contagem")
-def receber_contagem(data: Contagem):
-    print(f"Contagem recebida: {data.contador}")
-    return {"status": "ok", "recebido": data.contador}
+def receber_contagem(data: ContagemPayload, db: Session = Depends(get_db)):
+    registro = Contagem(contador=data.contador)
+    db.add(registro)
+    db.commit()
+    db.refresh(registro)
 
+    return {
+        "status": "salvo",
+        "id": registro.id,
+        "contador": registro.contador,
+        "hora": str(registro.created_at),
+    }
 
-@app.put("/api/config")
-def atualizar_config(cfg: dict):
-    print("Config recebida:", cfg)
-    return {"status": "config atualizada"}
-
-
-@app.delete("/api/reset")
-def resetar():
-    print("reset solicitado pelo ESP")
-    return {"status": "reset executado"}
+@app.get("/api/contagens")
+def listar_contagens(db: Session = Depends(get_db)):
+    dados = db.query(Contagem).order_by(Contagem.id.desc()).all()
+    return dados
